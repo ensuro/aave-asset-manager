@@ -14,19 +14,19 @@ const helpers = require("@nomicfoundation/hardhat-network-helpers");
 describe("Test AAVE asset manager - run at https://polygonscan.com/block/33313517", function () {
   let currency;
   let pool;
-  let AAVEv2AssetManager;
   let owner, lp, lp2, guardian, admin;
   const _A = amountFunction(6);
   let jrEtk, srEtk;
   let accessManager;
-  let aToken;
   const CENTS = _A(0.001);
 
   const ADDRESSES = {
     usdc: "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174",
     aave: "0x8dFf5E27EA6b7AC08EbFdf9eB090F32ee9a30fcf",
+    aaveV3: "0x794a61358D6845594F94dc1DB02A252b5b4814aD",
     usrUSDC: "0x4d97dcd97ec945f40cf65f87097ace5ea0476045", // Random account with lot of USDC
     amUSDC: "0x1a13F4Ca1d028320A707D99520AbFefca3998b7F",
+    amUSDCv3: "0x625E7708f30cA75bfd92586e17077590C60eb4cD",
 
     wmatic: "0x0d500B1d8E8eF31E21C99d1Db9A6444d3ADf1270",
     weth: "0x7ceB23fD6bC0adD59E62ac25578270cFf1b9f619",
@@ -57,8 +57,6 @@ describe("Test AAVE asset manager - run at https://polygonscan.com/block/3331351
     lp = await ethers.getSigner(ADDRESSES.usrUSDC);
 
 
-    AAVEv2AssetManager = await ethers.getContractFactory("AAVEv2AssetManager");
-
     pool = await deployPool(hre, {
       currency: ADDRESSES.usdc,
       grantRoles: [],
@@ -67,7 +65,6 @@ describe("Test AAVE asset manager - run at https://polygonscan.com/block/3331351
     pool._A = _A;
 
     currency = await ethers.getContractAt("IERC20Metadata", ADDRESSES.usdc);
-    aToken = await ethers.getContractAt("IERC20Metadata", ADDRESSES.amUSDC);
 
     srEtk = await addEToken(pool, {});
     jrEtk = await addEToken(pool, {});
@@ -88,9 +85,9 @@ describe("Test AAVE asset manager - run at https://polygonscan.com/block/3331351
     await currency.connect(lp).approve(pool.address, _A(100000));
   });
 
-  it("Creates an asset manager and invests in AAVE", async function () {
+  const testAMFlow = async function (amContract, aaveAddress, aToken) {
     await pool.connect(lp).deposit(jrEtk.address, _A(10000));
-    const am = await AAVEv2AssetManager.deploy(ADDRESSES.usdc, ADDRESSES.aave);
+    const am = await amContract.deploy(ADDRESSES.usdc, aaveAddress);
     expect(await am.getInvestmentValue()).to.be.equal(_A(0)); // Implementation balance is 0
 
     expect(await currency.balanceOf(jrEtk.address)).to.be.equal(_A(10000));
@@ -98,7 +95,7 @@ describe("Test AAVE asset manager - run at https://polygonscan.com/block/3331351
     await jrEtk.connect(admin).setAssetManager(am.address, false);
 
     await jrEtk.connect(admin).forwardToAssetManager(
-      AAVEv2AssetManager.interface.encodeFunctionData(
+      amContract.interface.encodeFunctionData(
         "setLiquidityThresholds", [_A(1000), _A(2000), _A(3000)]
       )
     );
@@ -159,15 +156,15 @@ describe("Test AAVE asset manager - run at https://polygonscan.com/block/3331351
     expect(evt.args.amount).to.be.closeTo(postBalance, CENTS);
     evt = getTransactionEvent(am.interface, receipt, "EarningsRecorded");
     expect(evt.args.earnings).to.be.closeTo(postBalance.sub(preBalance), CENTS);
-  });
+  };
 
-  it("The same AM contract can be shared between reserves - just shares code", async function () {
+  const testSharedAm = async function (amContract, aaveAddress, aToken) {
     await pool.connect(lp).deposit(jrEtk.address, _A(10000));
     await currency.connect(lp).transfer(lp2.address, _A(5000)); // give some money to my friend lp2
     await currency.connect(lp2).approve(pool.address, ethers.constants.MaxUint256);
     await pool.connect(lp2).deposit(srEtk.address, _A(5000));
 
-    const am = await AAVEv2AssetManager.deploy(ADDRESSES.usdc, ADDRESSES.aave);
+    const am = await amContract.deploy(ADDRESSES.usdc, aaveAddress);
 
     expect(await currency.balanceOf(jrEtk.address)).to.be.equal(_A(10000));
     expect(await currency.balanceOf(srEtk.address)).to.be.equal(_A(5000));
@@ -176,13 +173,13 @@ describe("Test AAVE asset manager - run at https://polygonscan.com/block/3331351
     await srEtk.connect(guardian).setAssetManager(am.address, false);
 
     await jrEtk.connect(admin).forwardToAssetManager(
-      AAVEv2AssetManager.interface.encodeFunctionData(
+      amContract.interface.encodeFunctionData(
         "setLiquidityThresholds", [_A(1000), _A(2000), _A(3000)]
       )
     );
 
     await srEtk.connect(admin).forwardToAssetManager(
-      AAVEv2AssetManager.interface.encodeFunctionData(
+      amContract.interface.encodeFunctionData(
         "setLiquidityThresholds", [_A(500), _A(1000), _A(1500)]
       )
     );
@@ -191,5 +188,29 @@ describe("Test AAVE asset manager - run at https://polygonscan.com/block/3331351
     await srEtk.checkpoint();
     expect(await aToken.balanceOf(jrEtk.address)).to.be.closeTo(_A(8000), CENTS);
     expect(await aToken.balanceOf(srEtk.address)).to.be.closeTo(_A(4000), CENTS);
+  };
+
+  it("Creates an asset manager and invests in AAVE-v2", async function () {
+    const AAVEv2AssetManager = await ethers.getContractFactory("AAVEv2AssetManager");
+    const aToken = await ethers.getContractAt("IERC20Metadata", ADDRESSES.amUSDC);
+    await testAMFlow(AAVEv2AssetManager, ADDRESSES.aave, aToken);
+  });
+
+  it("The same AM contract can be shared between reserves - just shares code - AAVE-v2", async function () {
+    const AAVEv2AssetManager = await ethers.getContractFactory("AAVEv2AssetManager");
+    const aToken = await ethers.getContractAt("IERC20Metadata", ADDRESSES.amUSDC);
+    await testSharedAm(AAVEv2AssetManager, ADDRESSES.aave, aToken);
+  });
+
+  it("Creates an asset manager and invests in AAVE-v3", async function () {
+    const AAVEv3AssetManager = await ethers.getContractFactory("AAVEv3AssetManager");
+    const aToken = await ethers.getContractAt("IERC20Metadata", ADDRESSES.amUSDCv3);
+    await testAMFlow(AAVEv3AssetManager, ADDRESSES.aaveV3, aToken);
+  });
+
+  it("The same AM contract can be shared between reserves - just shares code - AAVE-v3", async function () {
+    const AAVEv3AssetManager = await ethers.getContractFactory("AAVEv3AssetManager");
+    const aToken = await ethers.getContractAt("IERC20Metadata", ADDRESSES.amUSDCv3);
+    await testSharedAm(AAVEv3AssetManager, ADDRESSES.aaveV3, aToken);
   });
 });

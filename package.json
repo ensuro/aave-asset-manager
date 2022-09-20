@@ -33,7 +33,6 @@
     "typescript": "^4.8.2"
   },
   "dependencies": {
-    "@aave/protocol-v2": "https://github.com/gnarvaja/protocol-v2.git",
     "@ensuro/core": "^2.0.0-beta8",
     "@openzeppelin/contracts": "^4.7.3",
     "@openzeppelin/contracts-upgradeable": "^4.7.3",

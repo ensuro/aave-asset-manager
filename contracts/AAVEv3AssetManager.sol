@@ -3,22 +3,22 @@ pragma solidity ^0.8.0;
 
 import {LiquidityThresholdAssetManager} from "@ensuro/core/contracts/LiquidityThresholdAssetManager.sol";
 import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
-import {ILendingPool} from "./dependencies/aave-v2/ILendingPool.sol";
+import {IPool} from "./dependencies/aave-v3/IPool.sol";
 
 /**
  * @title Asset Manager that deploys the funds into an ERC4626 vault
- * @dev Using liquidity thresholds defined in {LiquidityThresholdAssetManager}, deploys the funds into AAVEv2.
+ * @dev Using liquidity thresholds defined in {LiquidityThresholdAssetManager}, deploys the funds into AAVEv3.
  * @custom:security-contact security@ensuro.co
  * @author Ensuro
  */
-contract AAVEv2AssetManager is LiquidityThresholdAssetManager {
+contract AAVEv3AssetManager is LiquidityThresholdAssetManager {
   bytes32 internal constant DATA_PROVIDER_ID =
     0x0100000000000000000000000000000000000000000000000000000000000000;
 
-  ILendingPool internal immutable _aave;
+  IPool internal immutable _aave;
   IERC20Metadata internal immutable _aToken;
 
-  constructor(IERC20Metadata asset_, ILendingPool aave_) LiquidityThresholdAssetManager(asset_) {
+  constructor(IERC20Metadata asset_, IPool aave_) LiquidityThresholdAssetManager(asset_) {
     _aave = aave_;
     _aToken = IERC20Metadata(aave_.getReserveData(address(asset_)).aTokenAddress);
   }
@@ -30,7 +30,7 @@ contract AAVEv2AssetManager is LiquidityThresholdAssetManager {
 
   function _invest(uint256 amount) internal override {
     super._invest(amount);
-    _aave.deposit(address(_asset), amount, address(this), 0);
+    _aave.supply(address(_asset), amount, address(this), 0);
   }
 
   function _deinvest(uint256 amount) internal override {
