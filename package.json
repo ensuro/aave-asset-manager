@@ -1,6 +1,6 @@
 {
   "name": "aave-asset-manager",
-  "version": "0.1.0",
+  "version": "2.0.0",
   "description": "AAVE v2 and v3 asset manager implementations for the Ensuro Protocol",
   "scripts": {
     "prettier": "prettier --write 'contracts/**/*.sol' --write 'test/**/*.js'",
@@ -33,7 +33,7 @@
     "typescript": "^4.8.2"
   },
   "dependencies": {
-    "@ensuro/core": "^2.0.0-beta9",
+    "@ensuro/core": "^2.0.0",
     "@openzeppelin/contracts": "^4.7.3",
     "@openzeppelin/contracts-upgradeable": "^4.7.3",
     "hardhat-dependency-compiler": "^1.1.3"
