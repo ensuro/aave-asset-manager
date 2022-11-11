@@ -104,7 +104,7 @@ describe("Test AAVE asset manager - running at https://polygonscan.com/block/333
     let tx = await jrEtk.checkpoint();
     let receipt = await tx.wait();
     expect(await currency.balanceOf(jrEtk.address)).to.be.equal(_A(2000));
-    expect(await aToken.balanceOf(jrEtk.address)).to.be.equal(_A(8000));
+    expect(await aToken.balanceOf(jrEtk.address)).to.be.closeTo(_A(8000), CENTS);
     let evt = getTransactionEvent(am.interface, receipt, "MoneyInvested");
     expect(evt.args.amount).to.be.equal(_A(8000));
 
