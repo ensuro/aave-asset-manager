@@ -6,7 +6,7 @@ import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IER
 import {IPool} from "./dependencies/aave-v3/IPool.sol";
 
 /**
- * @title Asset Manager that deploys the funds into an ERC4626 vault
+ * @title Asset Manager that deploys the funds into AAVEv3
  * @dev Using liquidity thresholds defined in {LiquidityThresholdAssetManager}, deploys the funds into AAVEv3.
  * @custom:security-contact security@ensuro.co
  * @author Ensuro
@@ -23,22 +23,22 @@ contract AAVEv3AssetManager is LiquidityThresholdAssetManager {
     _aToken = IERC20Metadata(aave_.getReserveData(address(asset_)).aTokenAddress);
   }
 
-  function connect() public override {
+  function connect() public virtual override {
     super.connect();
     _asset.approve(address(_aave), type(uint256).max); // infinite approval to the AAVE lending pool
   }
 
-  function _invest(uint256 amount) internal override {
+  function _invest(uint256 amount) internal virtual override {
     super._invest(amount);
     _aave.supply(address(_asset), amount, address(this), 0);
   }
 
-  function _deinvest(uint256 amount) internal override {
+  function _deinvest(uint256 amount) internal virtual override {
     super._deinvest(amount);
     _aave.withdraw(address(_asset), amount, address(this));
   }
 
-  function deinvestAll() external override returns (int256 earnings) {
+  function deinvestAll() external virtual override returns (int256 earnings) {
     DiamondStorage storage ds = diamondStorage();
     uint256 withdrawn = (_aToken.balanceOf(address(this)) != 0)
       ? _aave.withdraw(address(_asset), type(uint256).max, address(this))
@@ -50,7 +50,7 @@ contract AAVEv3AssetManager is LiquidityThresholdAssetManager {
     return earnings;
   }
 
-  function getInvestmentValue() public view override returns (uint256) {
+  function getInvestmentValue() public view virtual override returns (uint256) {
     return _aToken.balanceOf(address(this));
   }
 }
