@@ -212,4 +212,52 @@ describe("Test AAVE asset manager - running at https://polygonscan.com/block/333
     const aToken = await hre.ethers.getContractAt("IERC20Metadata", ADDRESSES.amUSDCv3);
     await testSharedAm(AAVEv3AssetManager, ADDRESSES.aaveV3, aToken);
   });
+
+  it("Can deinvestAll when no funds in AAVE", async function () {
+    const AAVEv3AssetManager = await hre.ethers.getContractFactory("AAVEv3AssetManager");
+    const am = await AAVEv3AssetManager.deploy(ADDRESSES.usdc, ADDRESSES.aaveV3);
+    await jrEtk.connect(admin).setAssetManager(am.address, false);
+    // TODO: delete this deposit after Ensuro upgrade
+    await currency.connect(lp).approve(pool.address, hre.ethers.constants.MaxUint256);
+    await pool.connect(lp).deposit(jrEtk.address, _A(5000));
+    await jrEtk.connect(admin).setAssetManager(ethers.constants.AddressZero, false);
+  });
+
+  it("Can change the AM", async function () {
+    const AAVEv3AssetManager = await hre.ethers.getContractFactory("AAVEv3AssetManager");
+    const aToken = await hre.ethers.getContractAt("IERC20Metadata", ADDRESSES.amUSDCv3);
+    const am = await AAVEv3AssetManager.deploy(ADDRESSES.usdc, ADDRESSES.aaveV3);
+    await jrEtk.connect(admin).setAssetManager(am.address, false);
+    await currency.connect(lp).approve(pool.address, hre.ethers.constants.MaxUint256);
+    await pool.connect(lp).deposit(jrEtk.address, _A(2000));
+    await jrEtk
+      .connect(admin)
+      .forwardToAssetManager(
+        AAVEv3AssetManager.interface.encodeFunctionData("setLiquidityThresholds", [_A(100), _A(160), _A(200)])
+      );
+    await jrEtk.checkpoint();
+    expect(await currency.balanceOf(jrEtk.address)).to.be.equal(_A(160));
+    expect(await aToken.balanceOf(jrEtk.address)).to.be.equal(_A(2000 - 160));
+    expect(await jrEtk.totalSupply()).to.be.equal(_A(2000));
+
+    const am2 = await AAVEv3AssetManager.deploy(ADDRESSES.usdc, ADDRESSES.aaveV3);
+    await jrEtk.connect(admin).setAssetManager(am2.address, false);
+    // am deinvested
+    expect(await currency.balanceOf(jrEtk.address)).to.be.closeTo(_A(2000), _A("0.001"));
+    expect(await aToken.balanceOf(jrEtk.address)).to.be.equal(_A(0));
+    expect(await jrEtk.totalSupply()).to.be.closeTo(_A(2000), _A("0.001"));
+
+    // Reset the liquidity thresholds, becase the storage is cleaned on connect
+    await jrEtk
+      .connect(admin)
+      .forwardToAssetManager(
+        AAVEv3AssetManager.interface.encodeFunctionData("setLiquidityThresholds", [_A(100), _A(160), _A(200)])
+      );
+
+    await jrEtk.checkpoint();
+    expect(await jrEtk.totalSupply()).to.be.closeTo(_A(2000), _A("0.001"));
+    // liquidity Thesholds reused because re-using the same storage
+    expect(await currency.balanceOf(jrEtk.address)).to.be.equal(_A(160));
+    expect(await aToken.balanceOf(jrEtk.address)).to.be.closeTo(_A(2000 - 160), _A("0.001"));
+  });
 });

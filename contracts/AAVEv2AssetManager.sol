@@ -42,7 +42,7 @@ contract AAVEv2AssetManager is LiquidityThresholdAssetManager {
     DiamondStorage storage ds = diamondStorage();
     uint256 withdrawn = _aave.withdraw(address(_asset), type(uint256).max, address(this));
     earnings = int256(withdrawn) - int256(uint256(ds.lastInvestmentValue));
-    ds.lastInvestmentValue = uint128(withdrawn);
+    ds.lastInvestmentValue = 0;
     emit MoneyDeinvested(withdrawn);
     emit EarningsRecorded(earnings);
     return earnings;
