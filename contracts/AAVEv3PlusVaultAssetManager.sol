@@ -28,7 +28,10 @@ contract AAVEv3PlusVaultAssetManager is AAVEv3AssetManager {
       address(vault_) != address(0),
       "AAVEv3PlusVaultAssetManager: vault cannot be zero address"
     );
-    require(address(asset_) != vault_.asset(), "ERC4626AssetManager: vault cannot be zero address");
+    require(
+      address(asset_) == vault_.asset(),
+      "AAVEv3PlusVaultAssetManager: vault must have the same asset"
+    );
     _vault = vault_;
   }
 

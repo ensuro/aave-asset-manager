@@ -40,7 +40,9 @@ contract AAVEv2AssetManager is LiquidityThresholdAssetManager {
 
   function deinvestAll() external override returns (int256 earnings) {
     DiamondStorage storage ds = diamondStorage();
-    uint256 withdrawn = _aave.withdraw(address(_asset), type(uint256).max, address(this));
+    uint256 withdrawn = (_aToken.balanceOf(address(this)) != 0)
+      ? _aave.withdraw(address(_asset), type(uint256).max, address(this))
+      : 0;
     earnings = int256(withdrawn) - int256(uint256(ds.lastInvestmentValue));
     ds.lastInvestmentValue = 0;
     emit MoneyDeinvested(withdrawn);

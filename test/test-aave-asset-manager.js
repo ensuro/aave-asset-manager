@@ -86,178 +86,214 @@ describe("Test AAVE asset manager - running at https://polygonscan.com/block/333
     await currency.connect(lp).approve(pool.address, _A(100000));
   });
 
-  const testAMFlow = async function (amContract, aaveAddress, aToken) {
-    await pool.connect(lp).deposit(jrEtk.address, _A(10000));
-    const am = await amContract.deploy(ADDRESSES.usdc, aaveAddress);
-    expect(await am.getInvestmentValue()).to.be.equal(_A(0)); // Implementation balance is 0
-
-    expect(await currency.balanceOf(jrEtk.address)).to.be.equal(_A(10000));
-
-    await jrEtk.connect(admin).setAssetManager(am.address, false);
-
-    await jrEtk
-      .connect(admin)
-      .forwardToAssetManager(
-        amContract.interface.encodeFunctionData("setLiquidityThresholds", [_A(1000), _A(2000), _A(3000)])
-      );
-
-    let tx = await jrEtk.checkpoint();
-    let receipt = await tx.wait();
-    expect(await currency.balanceOf(jrEtk.address)).to.be.equal(_A(2000));
-    expect(await aToken.balanceOf(jrEtk.address)).to.be.closeTo(_A(8000), CENTS);
-    let evt = getTransactionEvent(am.interface, receipt, "MoneyInvested");
-    expect(evt.args.amount).to.be.equal(_A(8000));
-
-    // After some time, earnings generated and distributed
-    await helpers.time.increase(3600 * 24 * 365);
-    const newBalance = await aToken.balanceOf(jrEtk.address);
-    expect(newBalance).to.be.gt(_A(8000)); // Yields produced by AAVE's interest rate
-    tx = await jrEtk.recordEarnings();
-    receipt = await tx.wait();
-    evt = getTransactionEvent(am.interface, receipt, "EarningsRecorded");
-    expect(evt.args.earnings).to.be.closeTo(newBalance - _A(8000), CENTS);
-    expect(await jrEtk.balanceOf(lp.address)).to.closeTo(newBalance.add(_A(2000)), CENTS);
-
-    // Withdrawal more than ETK liquidity requires deinvestment
-    tx = await pool.connect(lp).withdraw(jrEtk.address, _A(3000));
-    receipt = await tx.wait();
-    evt = getTransactionEvent(am.interface, receipt, "MoneyDeinvested");
-    expect(evt.args.amount).to.be.equal(_A(3000));
-    expect(await currency.balanceOf(jrEtk.address)).to.be.equal(_A(2000)); // jrEtk stays at middle
-    expect(await aToken.balanceOf(jrEtk.address)).to.be.closeTo(newBalance - _A(3000), CENTS);
-
-    // Withdrawal less than ETK liquidity doesn't
-    tx = await pool.connect(lp).withdraw(jrEtk.address, _A(1500));
-    receipt = await tx.wait();
-    evt = getTransactionEvent(am.interface, receipt, "MoneyDeinvested");
-    expect(evt).to.be.equal(null);
-    expect(await currency.balanceOf(jrEtk.address)).to.be.equal(_A(500));
-    expect(await aToken.balanceOf(jrEtk.address)).to.be.closeTo(newBalance - _A(3000), CENTS);
-
-    // Rebalance refills ETK liquidity
-    tx = await jrEtk.rebalance();
-    receipt = await tx.wait();
-    evt = getTransactionEvent(am.interface, receipt, "MoneyDeinvested");
-    expect(evt.args.amount).to.be.equal(_A(1500));
-    expect(await currency.balanceOf(jrEtk.address)).to.be.equal(_A(2000)); // jrEtk back at middle
-    expect(await aToken.balanceOf(jrEtk.address)).to.be.closeTo(newBalance - _A(4500), CENTS);
-
-    // Setting AM to zero deinvests all
-    const preBalance = await aToken.balanceOf(jrEtk.address);
-    await helpers.time.increase(3600 * 24 * 90);
-    const postBalance = await aToken.balanceOf(jrEtk.address);
-    expect(postBalance).to.be.gt(preBalance); // some returns
-    tx = await jrEtk.connect(admin).setAssetManager(hre.ethers.constants.AddressZero, false);
-    receipt = await tx.wait();
-    expect(await aToken.balanceOf(jrEtk.address)).to.be.equal(0);
-    expect(await currency.balanceOf(jrEtk.address)).to.be.closeTo(_A(2000).add(postBalance), CENTS);
-    evt = getTransactionEvent(am.interface, receipt, "MoneyDeinvested");
-    expect(evt.args.amount).to.be.closeTo(postBalance, CENTS);
-    evt = getTransactionEvent(am.interface, receipt, "EarningsRecorded");
-    expect(evt.args.earnings).to.be.closeTo(postBalance.sub(preBalance), CENTS);
-  };
-
-  const testSharedAm = async function (amContract, aaveAddress, aToken) {
-    await pool.connect(lp).deposit(jrEtk.address, _A(10000));
-    await currency.connect(lp).transfer(lp2.address, _A(5000)); // give some money to my friend lp2
-    await currency.connect(lp2).approve(pool.address, hre.ethers.constants.MaxUint256);
-    await pool.connect(lp2).deposit(srEtk.address, _A(5000));
-
-    const am = await amContract.deploy(ADDRESSES.usdc, aaveAddress);
-
-    expect(await currency.balanceOf(jrEtk.address)).to.be.equal(_A(10000));
-    expect(await currency.balanceOf(srEtk.address)).to.be.equal(_A(5000));
-
-    await jrEtk.connect(admin).setAssetManager(am.address, false);
-    await srEtk.connect(guardian).setAssetManager(am.address, false);
-
-    await jrEtk
-      .connect(admin)
-      .forwardToAssetManager(
-        amContract.interface.encodeFunctionData("setLiquidityThresholds", [_A(1000), _A(2000), _A(3000)])
-      );
-
-    await srEtk
-      .connect(admin)
-      .forwardToAssetManager(
-        amContract.interface.encodeFunctionData("setLiquidityThresholds", [_A(500), _A(1000), _A(1500)])
-      );
-
-    await jrEtk.checkpoint();
-    await srEtk.checkpoint();
-    expect(await aToken.balanceOf(jrEtk.address)).to.be.closeTo(_A(8000), CENTS);
-    expect(await aToken.balanceOf(srEtk.address)).to.be.closeTo(_A(4000), CENTS);
-  };
-
-  it("Creates an asset manager and invests in AAVE-v2", async function () {
-    const AAVEv2AssetManager = await hre.ethers.getContractFactory("AAVEv2AssetManager");
+  async function setupAAVEv2() {
+    const amContract = await hre.ethers.getContractFactory("AAVEv2AssetManager");
     const aToken = await hre.ethers.getContractAt("IERC20Metadata", ADDRESSES.amUSDC);
-    await testAMFlow(AAVEv2AssetManager, ADDRESSES.aave, aToken);
-  });
+    const aaveAddress = ADDRESSES.aave;
+    const am = await amContract.deploy(ADDRESSES.usdc, aaveAddress);
+    const deployFunction = async function (asset, aaveAddress) {
+      return await amContract.deploy(asset, aaveAddress);
+    };
+    return { amContract, aToken, aaveAddress, am, deployFunction };
+  }
 
-  it("The same AM contract can be shared between reserves - just shares code - AAVE-v2", async function () {
-    const AAVEv2AssetManager = await hre.ethers.getContractFactory("AAVEv2AssetManager");
-    const aToken = await hre.ethers.getContractAt("IERC20Metadata", ADDRESSES.amUSDC);
-    await testSharedAm(AAVEv2AssetManager, ADDRESSES.aave, aToken);
-  });
-
-  it("Creates an asset manager and invests in AAVE-v3", async function () {
-    const AAVEv3AssetManager = await hre.ethers.getContractFactory("AAVEv3AssetManager");
+  async function setupAAVEv3() {
+    const amContract = await hre.ethers.getContractFactory("AAVEv3AssetManager");
     const aToken = await hre.ethers.getContractAt("IERC20Metadata", ADDRESSES.amUSDCv3);
-    await testAMFlow(AAVEv3AssetManager, ADDRESSES.aaveV3, aToken);
-  });
+    const aaveAddress = ADDRESSES.aaveV3;
+    const am = await amContract.deploy(ADDRESSES.usdc, aaveAddress);
+    const deployFunction = async function (asset, aaveAddress) {
+      return await amContract.deploy(asset, aaveAddress);
+    };
+    return { amContract, aToken, aaveAddress, am, deployFunction };
+  }
 
-  it("The same AM contract can be shared between reserves - just shares code - AAVE-v3", async function () {
-    const AAVEv3AssetManager = await hre.ethers.getContractFactory("AAVEv3AssetManager");
+  async function setupAAVEv3PlusVault() {
+    const amContract = await hre.ethers.getContractFactory("AAVEv3PlusVaultAssetManager");
+    const TestVault = await hre.ethers.getContractFactory("TestVault");
     const aToken = await hre.ethers.getContractAt("IERC20Metadata", ADDRESSES.amUSDCv3);
-    await testSharedAm(AAVEv3AssetManager, ADDRESSES.aaveV3, aToken);
+    const aaveAddress = ADDRESSES.aaveV3;
+    const vault = await TestVault.deploy("Test Vault", "TEST", ADDRESSES.usdc);
+    const am = await amContract.deploy(ADDRESSES.usdc, aaveAddress, vault.address);
+    const deployFunction = async function (asset, aaveAddress) {
+      return await amContract.deploy(asset, aaveAddress, vault.address);
+    };
+    return { amContract, aToken, aaveAddress, am, deployFunction };
+  }
+
+  const variants = [
+    { name: "AAVEv2", setup: setupAAVEv2 },
+    { name: "AAVEv3", setup: setupAAVEv3 },
+    { name: "AAVEv3PlusVault", setup: setupAAVEv3PlusVault },
+  ];
+
+  variants.map((variant) => {
+    const _tn = (testName) => `${testName} - ${variant.name}`;
+
+    it(_tn("Creates an asset manager and does several flow"), async () => {
+      const { amContract, aToken, am } = await variant.setup();
+      await pool.connect(lp).deposit(jrEtk.address, _A(10000));
+      expect(await am.getInvestmentValue()).to.be.equal(_A(0)); // Implementation balance is 0
+
+      expect(await currency.balanceOf(jrEtk.address)).to.be.equal(_A(10000));
+
+      await jrEtk.connect(admin).setAssetManager(am.address, false);
+
+      await jrEtk
+        .connect(admin)
+        .forwardToAssetManager(
+          amContract.interface.encodeFunctionData("setLiquidityThresholds", [_A(1000), _A(2000), _A(3000)])
+        );
+
+      let tx = await jrEtk.checkpoint();
+      let receipt = await tx.wait();
+      expect(await currency.balanceOf(jrEtk.address)).to.be.equal(_A(2000));
+      expect(await aToken.balanceOf(jrEtk.address)).to.be.closeTo(_A(8000), CENTS);
+      let evt = getTransactionEvent(am.interface, receipt, "MoneyInvested");
+      expect(evt.args.amount).to.be.equal(_A(8000));
+
+      // After some time, earnings generated and distributed
+      await helpers.time.increase(3600 * 24 * 365);
+      const newBalance = await aToken.balanceOf(jrEtk.address);
+      expect(newBalance).to.be.gt(_A(8000)); // Yields produced by AAVE's interest rate
+      tx = await jrEtk.recordEarnings();
+      receipt = await tx.wait();
+      evt = getTransactionEvent(am.interface, receipt, "EarningsRecorded");
+      expect(evt.args.earnings).to.be.closeTo(newBalance - _A(8000), CENTS);
+      expect(await jrEtk.balanceOf(lp.address)).to.closeTo(newBalance.add(_A(2000)), CENTS);
+
+      // Withdrawal more than ETK liquidity requires deinvestment
+      tx = await pool.connect(lp).withdraw(jrEtk.address, _A(3000));
+      receipt = await tx.wait();
+      evt = getTransactionEvent(am.interface, receipt, "MoneyDeinvested");
+      expect(evt.args.amount).to.be.equal(_A(3000));
+      expect(await currency.balanceOf(jrEtk.address)).to.be.equal(_A(2000)); // jrEtk stays at middle
+      expect(await aToken.balanceOf(jrEtk.address)).to.be.closeTo(newBalance - _A(3000), CENTS);
+
+      // Withdrawal less than ETK liquidity doesn't
+      tx = await pool.connect(lp).withdraw(jrEtk.address, _A(1500));
+      receipt = await tx.wait();
+      evt = getTransactionEvent(am.interface, receipt, "MoneyDeinvested");
+      expect(evt).to.be.equal(null);
+      expect(await currency.balanceOf(jrEtk.address)).to.be.equal(_A(500));
+      expect(await aToken.balanceOf(jrEtk.address)).to.be.closeTo(newBalance - _A(3000), CENTS);
+
+      // Rebalance refills ETK liquidity
+      tx = await jrEtk.rebalance();
+      receipt = await tx.wait();
+      evt = getTransactionEvent(am.interface, receipt, "MoneyDeinvested");
+      expect(evt.args.amount).to.be.equal(_A(1500));
+      expect(await currency.balanceOf(jrEtk.address)).to.be.equal(_A(2000)); // jrEtk back at middle
+      expect(await aToken.balanceOf(jrEtk.address)).to.be.closeTo(newBalance - _A(4500), CENTS);
+
+      // Setting AM to zero deinvests all
+      const preBalance = await aToken.balanceOf(jrEtk.address);
+      await helpers.time.increase(3600 * 24 * 90);
+      const postBalance = await aToken.balanceOf(jrEtk.address);
+      expect(postBalance).to.be.gt(preBalance); // some returns
+      tx = await jrEtk.connect(admin).setAssetManager(hre.ethers.constants.AddressZero, false);
+      receipt = await tx.wait();
+      expect(await aToken.balanceOf(jrEtk.address)).to.be.equal(0);
+      expect(await currency.balanceOf(jrEtk.address)).to.be.closeTo(_A(2000).add(postBalance), CENTS);
+      evt = getTransactionEvent(am.interface, receipt, "MoneyDeinvested");
+      expect(evt.args.amount).to.be.closeTo(postBalance, CENTS);
+      evt = getTransactionEvent(am.interface, receipt, "EarningsRecorded");
+      expect(evt.args.earnings).to.be.closeTo(postBalance.sub(preBalance), CENTS);
+    });
+
+    it(_tn("Tests an asset manager shared by two reserves"), async () => {
+      const { amContract, aToken, am } = await variant.setup();
+      await pool.connect(lp).deposit(jrEtk.address, _A(10000));
+      await currency.connect(lp).transfer(lp2.address, _A(5000)); // give some money to my friend lp2
+      await currency.connect(lp2).approve(pool.address, hre.ethers.constants.MaxUint256);
+      await pool.connect(lp2).deposit(srEtk.address, _A(5000));
+
+      expect(await currency.balanceOf(jrEtk.address)).to.be.equal(_A(10000));
+      expect(await currency.balanceOf(srEtk.address)).to.be.equal(_A(5000));
+
+      await jrEtk.connect(admin).setAssetManager(am.address, false);
+      await srEtk.connect(guardian).setAssetManager(am.address, false);
+
+      await jrEtk
+        .connect(admin)
+        .forwardToAssetManager(
+          amContract.interface.encodeFunctionData("setLiquidityThresholds", [_A(1000), _A(2000), _A(3000)])
+        );
+
+      await srEtk
+        .connect(admin)
+        .forwardToAssetManager(
+          amContract.interface.encodeFunctionData("setLiquidityThresholds", [_A(500), _A(1000), _A(1500)])
+        );
+
+      await jrEtk.checkpoint();
+      await srEtk.checkpoint();
+      expect(await currency.balanceOf(jrEtk.address)).to.be.equal(_A(10000 - 8000));
+      expect(await currency.balanceOf(srEtk.address)).to.be.equal(_A(5000 - 4000));
+      expect(await aToken.balanceOf(jrEtk.address)).to.be.closeTo(_A(8000), CENTS);
+      expect(await aToken.balanceOf(srEtk.address)).to.be.closeTo(_A(4000), CENTS);
+
+      await jrEtk.connect(guardian).setAssetManager(ethers.constants.AddressZero, false);
+      expect(await aToken.balanceOf(jrEtk.address)).to.be.equal(0);
+      expect(await currency.balanceOf(jrEtk.address)).to.be.closeTo(_A(10000), CENTS);
+
+      await srEtk.connect(admin).setAssetManager(ethers.constants.AddressZero, false);
+      expect(await aToken.balanceOf(srEtk.address)).to.be.equal(0);
+      expect(await currency.balanceOf(srEtk.address)).to.be.closeTo(_A(5000), CENTS);
+    });
+
+    it(_tn("Can deinvestAll when no funds in AAVE"), async function () {
+      const { am } = await variant.setup();
+      await jrEtk.connect(admin).setAssetManager(am.address, false);
+      await jrEtk.connect(admin).setAssetManager(ethers.constants.AddressZero, false);
+    });
+
+    it(_tn("Can change the AM"), async function () {
+      const { am, amContract, aaveAddress, aToken, deployFunction } = await variant.setup();
+      await jrEtk.connect(admin).setAssetManager(am.address, false);
+      await currency.connect(lp).approve(pool.address, hre.ethers.constants.MaxUint256);
+      await pool.connect(lp).deposit(jrEtk.address, _A(2000));
+      await jrEtk
+        .connect(admin)
+        .forwardToAssetManager(
+          amContract.interface.encodeFunctionData("setLiquidityThresholds", [_A(100), _A(160), _A(200)])
+        );
+      await jrEtk.checkpoint();
+      expect(await currency.balanceOf(jrEtk.address)).to.be.equal(_A(160));
+      expect(await aToken.balanceOf(jrEtk.address)).to.be.equal(_A(2000 - 160));
+      expect(await jrEtk.totalSupply()).to.be.equal(_A(2000));
+
+      const am2 = await await deployFunction(ADDRESSES.usdc, aaveAddress);
+      await jrEtk.connect(admin).setAssetManager(am2.address, false);
+      // am deinvested
+      expect(await currency.balanceOf(jrEtk.address)).to.be.closeTo(_A(2000), _A("0.001"));
+      expect(await aToken.balanceOf(jrEtk.address)).to.be.equal(_A(0));
+      expect(await jrEtk.totalSupply()).to.be.closeTo(_A(2000), _A("0.001"));
+
+      // Reset the liquidity thresholds, becase the storage is cleaned on connect
+      await jrEtk
+        .connect(admin)
+        .forwardToAssetManager(
+          amContract.interface.encodeFunctionData("setLiquidityThresholds", [_A(100), _A(160), _A(200)])
+        );
+
+      await jrEtk.checkpoint();
+      expect(await jrEtk.totalSupply()).to.be.closeTo(_A(2000), _A("0.001"));
+      // liquidity Thesholds reused because re-using the same storage
+      expect(await currency.balanceOf(jrEtk.address)).to.be.equal(_A(160));
+      expect(await aToken.balanceOf(jrEtk.address)).to.be.closeTo(_A(2000 - 160), _A("0.001"));
+    });
   });
 
-  it("Can deinvestAll when no funds in AAVE", async function () {
-    const AAVEv3AssetManager = await hre.ethers.getContractFactory("AAVEv3AssetManager");
-    const am = await AAVEv3AssetManager.deploy(ADDRESSES.usdc, ADDRESSES.aaveV3);
-    await jrEtk.connect(admin).setAssetManager(am.address, false);
-    // TODO: delete this deposit after Ensuro upgrade
-    await currency.connect(lp).approve(pool.address, hre.ethers.constants.MaxUint256);
-    await pool.connect(lp).deposit(jrEtk.address, _A(5000));
-    await jrEtk.connect(admin).setAssetManager(ethers.constants.AddressZero, false);
-  });
-
-  it("Can change the AM", async function () {
-    const AAVEv3AssetManager = await hre.ethers.getContractFactory("AAVEv3AssetManager");
-    const aToken = await hre.ethers.getContractAt("IERC20Metadata", ADDRESSES.amUSDCv3);
-    const am = await AAVEv3AssetManager.deploy(ADDRESSES.usdc, ADDRESSES.aaveV3);
-    await jrEtk.connect(admin).setAssetManager(am.address, false);
-    await currency.connect(lp).approve(pool.address, hre.ethers.constants.MaxUint256);
-    await pool.connect(lp).deposit(jrEtk.address, _A(2000));
-    await jrEtk
-      .connect(admin)
-      .forwardToAssetManager(
-        AAVEv3AssetManager.interface.encodeFunctionData("setLiquidityThresholds", [_A(100), _A(160), _A(200)])
-      );
-    await jrEtk.checkpoint();
-    expect(await currency.balanceOf(jrEtk.address)).to.be.equal(_A(160));
-    expect(await aToken.balanceOf(jrEtk.address)).to.be.equal(_A(2000 - 160));
-    expect(await jrEtk.totalSupply()).to.be.equal(_A(2000));
-
-    const am2 = await AAVEv3AssetManager.deploy(ADDRESSES.usdc, ADDRESSES.aaveV3);
-    await jrEtk.connect(admin).setAssetManager(am2.address, false);
-    // am deinvested
-    expect(await currency.balanceOf(jrEtk.address)).to.be.closeTo(_A(2000), _A("0.001"));
-    expect(await aToken.balanceOf(jrEtk.address)).to.be.equal(_A(0));
-    expect(await jrEtk.totalSupply()).to.be.closeTo(_A(2000), _A("0.001"));
-
-    // Reset the liquidity thresholds, becase the storage is cleaned on connect
-    await jrEtk
-      .connect(admin)
-      .forwardToAssetManager(
-        AAVEv3AssetManager.interface.encodeFunctionData("setLiquidityThresholds", [_A(100), _A(160), _A(200)])
-      );
-
-    await jrEtk.checkpoint();
-    expect(await jrEtk.totalSupply()).to.be.closeTo(_A(2000), _A("0.001"));
-    // liquidity Thesholds reused because re-using the same storage
-    expect(await currency.balanceOf(jrEtk.address)).to.be.equal(_A(160));
-    expect(await aToken.balanceOf(jrEtk.address)).to.be.closeTo(_A(2000 - 160), _A("0.001"));
+  it("Checks AAVEv3PlusVaultAssetManager requires a vault and has to be the same asset", async function () {
+    const AAVEv3PlusVaultAssetManager = await hre.ethers.getContractFactory("AAVEv3PlusVaultAssetManager");
+    const TestVault = await hre.ethers.getContractFactory("TestVault");
+    await expect(
+      AAVEv3PlusVaultAssetManager.deploy(ADDRESSES.usdc, ADDRESSES.aaveV3, ethers.constants.AddressZero)
+    ).to.be.revertedWith("AAVEv3PlusVaultAssetManager: vault cannot be zero address");
+    const wrongVault = await TestVault.deploy("AToken USDC", "amUSDC", ADDRESSES.amUSDCv3);
+    await expect(
+      AAVEv3PlusVaultAssetManager.deploy(ADDRESSES.usdc, ADDRESSES.aaveV3, wrongVault.address)
+    ).to.be.revertedWith("AAVEv3PlusVaultAssetManager: vault must have the same asset");
   });
 });
