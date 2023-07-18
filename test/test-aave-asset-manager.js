@@ -118,7 +118,7 @@ describe("Test AAVE asset manager - running at https://polygonscan.com/block/333
     const deployFunction = async function (asset, aaveAddress) {
       return await amContract.deploy(asset, aaveAddress, vault.address);
     };
-    return { amContract, aToken, aaveAddress, am, deployFunction };
+    return { amContract, aToken, aaveAddress, am, deployFunction, vault };
   }
 
   const variants = [
@@ -295,5 +295,178 @@ describe("Test AAVE asset manager - running at https://polygonscan.com/block/333
     await expect(
       AAVEv3PlusVaultAssetManager.deploy(ADDRESSES.usdc, ADDRESSES.aaveV3, wrongVault.address)
     ).to.be.revertedWith("AAVEv3PlusVaultAssetManager: vault must have the same asset");
+  });
+
+  it("Tests AAVEv3PlusVaultAssetManager with vault investment", async () => {
+    const { amContract, aToken, am, vault } = await setupAAVEv3PlusVault();
+    await pool.connect(lp).deposit(jrEtk.address, _A(10000));
+    expect(await am.getInvestmentValue()).to.be.equal(_A(0)); // Implementation balance is 0
+
+    expect(await currency.balanceOf(jrEtk.address)).to.be.equal(_A(10000));
+
+    // LP deposits some money in the vault
+    await currency.connect(lp).approve(vault.address, ethers.constants.MaxUint256);
+    await vault.connect(lp).deposit(_A(1000), lp.address);
+
+    await jrEtk.connect(admin).setAssetManager(am.address, false);
+
+    await jrEtk
+      .connect(admin)
+      .forwardToAssetManager(
+        amContract.interface.encodeFunctionData("setLiquidityThresholds", [_A(1000), _A(2000), _A(3000)])
+      );
+
+    let tx = await jrEtk.checkpoint();
+    let receipt = await tx.wait();
+    expect(await currency.balanceOf(jrEtk.address)).to.be.equal(_A(2000));
+    expect(await aToken.balanceOf(jrEtk.address)).to.be.closeTo(_A(8000), CENTS);
+    let evt = getTransactionEvent(am.interface, receipt, "MoneyInvested");
+    expect(evt.args.amount).to.be.equal(_A(8000));
+
+    expect(await vault.totalAssets()).to.be.equal(_A(1000));
+    expect(await vault.balanceOf(jrEtk.address)).to.be.equal(_A(0));
+
+    // Not enough funds in AAVE
+    await expect(
+      jrEtk.connect(admin).forwardToAssetManager(amContract.interface.encodeFunctionData("aaveToVault", [_A(9000)]))
+    ).to.be.reverted;
+
+    await jrEtk
+      .connect(admin)
+      .forwardToAssetManager(amContract.interface.encodeFunctionData("aaveToVault", [_A(5000)]));
+
+    expect(await vault.totalAssets()).to.be.equal(_A(6000));
+    expect(await vault.balanceOf(jrEtk.address)).to.be.equal(_A(5000));
+    expect(await aToken.balanceOf(jrEtk.address)).to.be.closeTo(_A(3000), CENTS);
+
+    expect(await jrEtk.checkpoint())
+      .not.to.emit(am.interface, "MoneyInvested")
+      .not.to.emit(am.interface, "MoneyDeinvested");
+
+    // Transfer all from AAVE
+    await jrEtk
+      .connect(admin)
+      .forwardToAssetManager(amContract.interface.encodeFunctionData("aaveToVault", [ethers.constants.MaxUint256]));
+
+    expect(await vault.totalAssets()).to.be.closeTo(_A(9000), CENTS);
+    expect(await vault.balanceOf(jrEtk.address)).to.be.closeTo(_A(8000), CENTS);
+    expect(await aToken.balanceOf(jrEtk.address)).to.be.equal(_A(0));
+
+    expect(await jrEtk.checkpoint())
+      .not.to.emit(am.interface, "MoneyInvested")
+      .not.to.emit(am.interface, "MoneyDeinvested");
+
+    // Remove some liquidity from the vault (useful later)
+    await vault.lend(lp.address, _A(3000));
+    expect(await vault.totalAssets()).to.be.closeTo(_A(9000), CENTS); // unchanged
+    expect(await vault.maxWithdraw(jrEtk.address)).to.be.closeTo(_A(6000), CENTS); // some not withdrawable
+
+    // Not enough liquidity in the vault
+    await expect(
+      jrEtk.connect(admin).forwardToAssetManager(amContract.interface.encodeFunctionData("vaultToAave", [_A(7000)]))
+    ).to.be.reverted;
+
+    // Losses of the vault impact the reserve - A loss of 1000 is distributed between vault owners
+    await vault.debtDefault(_A(1000));
+
+    tx = await jrEtk.recordEarnings();
+    receipt = await tx.wait();
+    evt = getTransactionEvent(am.interface, receipt, "EarningsRecorded");
+    expect(evt.args.earnings).to.be.closeTo(_A((-1000 * 8000) / 9000), CENTS);
+    expect(await jrEtk.balanceOf(lp.address)).to.closeTo(_A(10000 - (1000 * 8000) / 9000), CENTS);
+
+    // Earnings too (here 100 as interest)
+    await vault.repay(lp.address, _A(500), _A(100));
+
+    tx = await jrEtk.recordEarnings();
+    receipt = await tx.wait();
+    evt = getTransactionEvent(am.interface, receipt, "EarningsRecorded");
+    expect(evt.args.earnings).to.be.closeTo(_A((100 * 8000) / 9000), CENTS);
+    expect(await jrEtk.balanceOf(lp.address)).to.closeTo(_A(10000 - (900 * 8000) / 9000), CENTS);
+
+    // balance in shares unchanged - in assets changed because of the losses
+    const shares = await vault.balanceOf(jrEtk.address);
+    expect(shares).to.be.closeTo(_A(8000), CENTS);
+    expect(await vault.previewRedeem(shares)).to.be.closeTo(_A(8000 - (900 * 8000) / 9000), CENTS);
+
+    await expect(
+      jrEtk.connect(admin).forwardToAssetManager(amContract.interface.encodeFunctionData("vaultToAave", [_A(5000)]))
+    ).not.to.be.reverted;
+
+    // After some time, earnings generated and distributed
+    await helpers.time.increase(3600 * 24 * 365);
+    const newBalance = await aToken.balanceOf(jrEtk.address);
+    expect(newBalance).to.be.gt(_A(5000)); // Yields produced by AAVE's interest rate
+    tx = await jrEtk.recordEarnings();
+    receipt = await tx.wait();
+    evt = getTransactionEvent(am.interface, receipt, "EarningsRecorded");
+    expect(evt.args.earnings).to.be.closeTo(newBalance - _A(5000), CENTS);
+    expect(await jrEtk.balanceOf(lp.address)).to.closeTo(
+      newBalance.add(_A(2000)).add(_A(3000 - (900 * 8000) / 9000)),
+      CENTS
+    );
+
+    // Sending MaxUint256 withdraws as much as possible
+    await expect(
+      jrEtk
+        .connect(admin)
+        .forwardToAssetManager(amContract.interface.encodeFunctionData("vaultToAave", [ethers.constants.MaxUint256]))
+    ).not.to.be.reverted;
+
+    expect(await vault.maxRedeem(jrEtk.address)).to.be.closeTo(_A(0), _A(0.0001));
+
+    // Withdrawal more than ETK liquidity requires deinvestment
+    tx = await pool.connect(lp).withdraw(jrEtk.address, _A(3000));
+    receipt = await tx.wait();
+    evt = getTransactionEvent(am.interface, receipt, "MoneyDeinvested");
+    expect(evt.args.amount).to.be.equal(_A(3000));
+    expect(await currency.balanceOf(jrEtk.address)).to.be.equal(_A(2000)); // jrEtk stays at middle
+    expect(await aToken.balanceOf(jrEtk.address)).to.be.closeTo(newBalance - _A(1400), CENTS);
+
+    // Withdrawal less than ETK liquidity doesn't
+    tx = await pool.connect(lp).withdraw(jrEtk.address, _A(1500));
+    receipt = await tx.wait();
+    evt = getTransactionEvent(am.interface, receipt, "MoneyDeinvested");
+    expect(evt).to.be.equal(null);
+    expect(await currency.balanceOf(jrEtk.address)).to.be.equal(_A(500));
+    expect(await aToken.balanceOf(jrEtk.address)).to.be.closeTo(newBalance - _A(1400), CENTS);
+
+    // Send from money from AAVE to the vault
+    await jrEtk
+      .connect(admin)
+      .forwardToAssetManager(
+        amContract.interface.encodeFunctionData("aaveToVault", [(await aToken.balanceOf(jrEtk.address)).sub(_A(400))])
+      );
+
+    let assetsBefore = await vault.totalAssets();
+    expect(await vault.maxRedeem(jrEtk.address)).to.be.closeTo(_A(3586.812), CENTS);
+    expect(await aToken.balanceOf(jrEtk.address)).to.be.closeTo(_A(400), CENTS);
+
+    // Rebalance refills ETK liquidity
+    expect(await currency.balanceOf(jrEtk.address)).to.be.equal(_A(500));
+    tx = await jrEtk.rebalance();
+    receipt = await tx.wait();
+    evt = getTransactionEvent(am.interface, receipt, "MoneyDeinvested");
+    expect(evt.args.amount).to.be.equal(_A(1500));
+    expect(await currency.balanceOf(jrEtk.address)).to.be.equal(_A(2000)); // jrEtk back at middle
+    expect(await aToken.balanceOf(jrEtk.address)).to.be.equal(0);
+    expect(await vault.totalAssets()).to.be.closeTo(assetsBefore.sub(_A(1100)), CENTS);
+    const assetsInVaultBefore = await vault.previewRedeem(await vault.balanceOf(jrEtk.address));
+
+    // Setting AM to zero deinvests all
+    tx = await jrEtk.connect(admin).setAssetManager(hre.ethers.constants.AddressZero, false);
+    receipt = await tx.wait();
+    expect(await aToken.balanceOf(jrEtk.address)).to.be.equal(0);
+
+    expect(await vault.previewRedeem(await vault.balanceOf(jrEtk.address))).to.be.equal(_A(600));
+
+    expect(await currency.balanceOf(jrEtk.address)).to.be.closeTo(
+      _A(2000).add(assetsInVaultBefore.sub(_A(600))),
+      CENTS
+    );
+    evt = getTransactionEvent(am.interface, receipt, "MoneyDeinvested");
+    expect(evt.args.amount).to.be.closeTo(assetsInVaultBefore.sub(_A(600)), CENTS);
+    evt = getTransactionEvent(am.interface, receipt, "EarningsRecorded");
+    expect(evt.args.earnings).to.be.closeTo(_A(-600), CENTS);
   });
 });
