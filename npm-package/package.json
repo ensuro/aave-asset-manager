@@ -1,0 +1,33 @@
+{
+  "name": "@ensuro/aave-asset-manager",
+  "description": "AAVE asset manager component for the Ensuro Protocol",
+  "version": "%%VERSION%%",
+  "files": [
+    "**/*.sol",
+    "/build/contracts/*.json",
+    "/build/interfaces/*.json",
+    "/js/*.js",
+    "/scripts/*.sh",
+    "/scripts/*.js"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git@github.com:ensuro/aave-asset-manager.git"
+  },
+  "keywords": [
+    "solidity",
+    "ethereum",
+    "smart",
+    "contracts",
+    "decentralized",
+    "insurance",
+    "ensuro",
+    "aave"
+  ],
+  "author": "Ensuro Dev Team <dev@ensuro.co>",
+  "license": "Apache-2.0",
+  "bugs": {
+    "url": "https://github.com/ensuro/aave-asset-manager/issues"
+  },
+  "homepage": "https://github.com/ensuro/aave-asset-manager#readme"
+}
