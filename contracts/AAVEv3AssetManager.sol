@@ -12,8 +12,7 @@ import {IPool} from "./dependencies/aave-v3/IPool.sol";
  * @author Ensuro
  */
 contract AAVEv3AssetManager is LiquidityThresholdAssetManager {
-  bytes32 internal constant DATA_PROVIDER_ID =
-    0x0100000000000000000000000000000000000000000000000000000000000000;
+  bytes32 internal constant DATA_PROVIDER_ID = 0x0100000000000000000000000000000000000000000000000000000000000000;
 
   IPool internal immutable _aave;
   IERC20Metadata internal immutable _aToken;

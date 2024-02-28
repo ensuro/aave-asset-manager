@@ -12,8 +12,7 @@ import {ILendingPool} from "./dependencies/aave-v2/ILendingPool.sol";
  * @author Ensuro
  */
 contract AAVEv2AssetManager is LiquidityThresholdAssetManager {
-  bytes32 internal constant DATA_PROVIDER_ID =
-    0x0100000000000000000000000000000000000000000000000000000000000000;
+  bytes32 internal constant DATA_PROVIDER_ID = 0x0100000000000000000000000000000000000000000000000000000000000000;
 
   ILendingPool internal immutable _aave;
   IERC20Metadata internal immutable _aToken;
