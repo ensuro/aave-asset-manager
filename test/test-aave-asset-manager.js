@@ -1,8 +1,11 @@
+const hre = require("hardhat");
 const { expect } = require("chai");
+const helpers = require("@nomicfoundation/hardhat-network-helpers");
 const { deployPool, deployPremiumsAccount, addEToken } = require("@ensuro/core/js/test-utils");
 const { amountFunction, grantRole, grantComponentRole, getTransactionEvent } = require("@ensuro/core/js/utils");
-const helpers = require("@nomicfoundation/hardhat-network-helpers");
-const hre = require("hardhat");
+
+const { ethers } = hre;
+const { MaxUint256, ZeroAddress } = ethers;
 
 describe("Test AAVE asset manager - running at https://polygonscan.com/block/33313517", function () {
   let currency;
@@ -183,7 +186,7 @@ describe("Test AAVE asset manager - running at https://polygonscan.com/block/333
       await helpers.time.increase(3600 * 24 * 90);
       const postBalance = await aToken.balanceOf(jrEtk);
       expect(postBalance).to.be.gt(preBalance); // some returns
-      tx = await jrEtk.connect(admin).setAssetManager(hre.ethers.ZeroAddress, false);
+      tx = await jrEtk.connect(admin).setAssetManager(ZeroAddress, false);
       receipt = await tx.wait();
       expect(await aToken.balanceOf(jrEtk)).to.be.equal(0);
       expect(await currency.balanceOf(jrEtk)).to.be.closeTo(_A(2000) + postBalance, CENTS);
@@ -197,7 +200,7 @@ describe("Test AAVE asset manager - running at https://polygonscan.com/block/333
       const { amContract, aToken, am } = await variant.setup();
       await pool.connect(lp).deposit(jrEtk, _A(10000));
       await currency.connect(lp).transfer(lp2, _A(5000)); // give some money to my friend lp2
-      await currency.connect(lp2).approve(pool, hre.ethers.MaxUint256);
+      await currency.connect(lp2).approve(pool, MaxUint256);
       await pool.connect(lp2).deposit(srEtk, _A(5000));
 
       expect(await currency.balanceOf(jrEtk)).to.be.equal(_A(10000));
@@ -225,11 +228,11 @@ describe("Test AAVE asset manager - running at https://polygonscan.com/block/333
       expect(await aToken.balanceOf(jrEtk)).to.be.closeTo(_A(8000), CENTS);
       expect(await aToken.balanceOf(srEtk)).to.be.closeTo(_A(4000), CENTS);
 
-      await jrEtk.connect(guardian).setAssetManager(ethers.ZeroAddress, false);
+      await jrEtk.connect(guardian).setAssetManager(ZeroAddress, false);
       expect(await aToken.balanceOf(jrEtk)).to.be.equal(0);
       expect(await currency.balanceOf(jrEtk)).to.be.closeTo(_A(10000), CENTS);
 
-      await srEtk.connect(admin).setAssetManager(ethers.ZeroAddress, false);
+      await srEtk.connect(admin).setAssetManager(ZeroAddress, false);
       expect(await aToken.balanceOf(srEtk)).to.be.equal(0);
       expect(await currency.balanceOf(srEtk)).to.be.closeTo(_A(5000), CENTS);
     });
@@ -237,13 +240,13 @@ describe("Test AAVE asset manager - running at https://polygonscan.com/block/333
     it(_tn("Can deinvestAll when no funds in AAVE"), async function () {
       const { am } = await variant.setup();
       await jrEtk.connect(admin).setAssetManager(am, false);
-      await jrEtk.connect(admin).setAssetManager(ethers.ZeroAddress, false);
+      await jrEtk.connect(admin).setAssetManager(ZeroAddress, false);
     });
 
     it(_tn("Can change the AM"), async function () {
       const { am, amContract, aaveAddress, aToken, deployFunction } = await variant.setup();
       await jrEtk.connect(admin).setAssetManager(am, false);
-      await currency.connect(lp).approve(pool, hre.ethers.MaxUint256);
+      await currency.connect(lp).approve(pool, MaxUint256);
       await pool.connect(lp).deposit(jrEtk, _A(2000));
       await jrEtk
         .connect(admin)
@@ -280,9 +283,9 @@ describe("Test AAVE asset manager - running at https://polygonscan.com/block/333
   it("Checks AAVEv3PlusVaultAssetManager requires a vault and has to be the same asset", async function () {
     const AAVEv3PlusVaultAssetManager = await hre.ethers.getContractFactory("AAVEv3PlusVaultAssetManager");
     const TestVault = await hre.ethers.getContractFactory("TestVault");
-    await expect(
-      AAVEv3PlusVaultAssetManager.deploy(ADDRESSES.usdc, ADDRESSES.aaveV3, ethers.ZeroAddress)
-    ).to.be.revertedWith("AAVEv3PlusVaultAssetManager: vault cannot be zero address");
+    await expect(AAVEv3PlusVaultAssetManager.deploy(ADDRESSES.usdc, ADDRESSES.aaveV3, ZeroAddress)).to.be.revertedWith(
+      "AAVEv3PlusVaultAssetManager: vault cannot be zero address"
+    );
     const wrongVault = await TestVault.deploy("AToken USDC", "amUSDC", ADDRESSES.amUSDCv3);
     await expect(AAVEv3PlusVaultAssetManager.deploy(ADDRESSES.usdc, ADDRESSES.aaveV3, wrongVault)).to.be.revertedWith(
       "AAVEv3PlusVaultAssetManager: vault must have the same asset"
@@ -297,7 +300,7 @@ describe("Test AAVE asset manager - running at https://polygonscan.com/block/333
     expect(await currency.balanceOf(jrEtk)).to.be.equal(_A(10000));
 
     // LP deposits some money in the vault
-    await currency.connect(lp).approve(vault, ethers.MaxUint256);
+    await currency.connect(lp).approve(vault, MaxUint256);
     await vault.connect(lp).deposit(_A(1000), lp);
 
     await jrEtk.connect(admin).setAssetManager(am, false);
@@ -338,7 +341,7 @@ describe("Test AAVE asset manager - running at https://polygonscan.com/block/333
     // Transfer all from AAVE
     await jrEtk
       .connect(admin)
-      .forwardToAssetManager(amContract.interface.encodeFunctionData("aaveToVault", [ethers.MaxUint256]));
+      .forwardToAssetManager(amContract.interface.encodeFunctionData("aaveToVault", [MaxUint256]));
 
     expect(await vault.totalAssets()).to.be.closeTo(_A(9000), CENTS);
     expect(await vault.balanceOf(jrEtk)).to.be.closeTo(_A(8000), CENTS);
@@ -397,9 +400,7 @@ describe("Test AAVE asset manager - running at https://polygonscan.com/block/333
 
     // Sending MaxUint256 withdraws as much as possible
     await expect(
-      jrEtk
-        .connect(admin)
-        .forwardToAssetManager(amContract.interface.encodeFunctionData("vaultToAave", [ethers.MaxUint256]))
+      jrEtk.connect(admin).forwardToAssetManager(amContract.interface.encodeFunctionData("vaultToAave", [MaxUint256]))
     ).not.to.be.reverted;
 
     expect(await vault.maxRedeem(jrEtk)).to.be.closeTo(_A(0), _A(0.0001));
@@ -443,7 +444,7 @@ describe("Test AAVE asset manager - running at https://polygonscan.com/block/333
     const assetsInVaultBefore = await vault.previewRedeem(await vault.balanceOf(jrEtk));
 
     // Setting AM to zero deinvests all
-    tx = await jrEtk.connect(admin).setAssetManager(hre.ethers.ZeroAddress, false);
+    tx = await jrEtk.connect(admin).setAssetManager(ZeroAddress, false);
     receipt = await tx.wait();
     expect(await aToken.balanceOf(jrEtk)).to.be.equal(0);
 
@@ -460,7 +461,7 @@ describe("Test AAVE asset manager - running at https://polygonscan.com/block/333
     const { amContract, aToken, am, vault } = await setupAAVEv3PlusVault();
     await pool.connect(lp).deposit(jrEtk, _A(10000));
     await currency.connect(lp).transfer(lp2, _A(5000)); // give some money to my friend lp2
-    await currency.connect(lp2).approve(pool, hre.ethers.MaxUint256);
+    await currency.connect(lp2).approve(pool, MaxUint256);
     await pool.connect(lp2).deposit(srEtk, _A(5000));
 
     expect(await currency.balanceOf(jrEtk)).to.be.equal(_A(10000));
@@ -491,13 +492,13 @@ describe("Test AAVE asset manager - running at https://polygonscan.com/block/333
     // Send money from AAVE to the vault
     await jrEtk
       .connect(admin)
-      .forwardToAssetManager(amContract.interface.encodeFunctionData("aaveToVault", [ethers.MaxUint256]));
+      .forwardToAssetManager(amContract.interface.encodeFunctionData("aaveToVault", [MaxUint256]));
     expect(await vault.totalAssets()).to.be.closeTo(_A(8000), CENTS);
     expect(await vault.balanceOf(jrEtk)).to.be.closeTo(_A(8000), CENTS);
 
     await srEtk
       .connect(admin)
-      .forwardToAssetManager(amContract.interface.encodeFunctionData("aaveToVault", [ethers.MaxUint256]));
+      .forwardToAssetManager(amContract.interface.encodeFunctionData("aaveToVault", [MaxUint256]));
     expect(await vault.totalAssets()).to.be.closeTo(_A(8000 + 4000), CENTS);
     expect(await vault.balanceOf(srEtk)).to.be.closeTo(_A(4000), CENTS);
 
@@ -508,7 +509,7 @@ describe("Test AAVE asset manager - running at https://polygonscan.com/block/333
     expect(await currency.balanceOf(jrEtk)).to.be.equal(_A(2000));
     expect(await aToken.balanceOf(jrEtk)).to.be.equal(_A(0));
 
-    await jrEtk.connect(guardian).setAssetManager(ethers.ZeroAddress, false);
+    await jrEtk.connect(guardian).setAssetManager(ZeroAddress, false);
     expect(await aToken.balanceOf(jrEtk)).to.be.equal(0);
     expect(await currency.balanceOf(jrEtk)).to.be.closeTo(_A(6500), CENTS);
 
@@ -520,7 +521,7 @@ describe("Test AAVE asset manager - running at https://polygonscan.com/block/333
     expect(await aToken.balanceOf(srEtk)).to.be.equal(_A(0));
     expect(await vault.balanceOf(srEtk)).to.be.equal(_A(0));
 
-    await srEtk.connect(admin).setAssetManager(ethers.ZeroAddress, false);
+    await srEtk.connect(admin).setAssetManager(ZeroAddress, false);
     expect(await aToken.balanceOf(srEtk)).to.be.equal(0);
     expect(await currency.balanceOf(srEtk)).to.be.closeTo(_A(500), CENTS);
   });
