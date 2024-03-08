@@ -1,14 +1,7 @@
 const { expect } = require("chai");
-const {
-  deployPool,
-  deployPremiumsAccount,
-  addRiskModule,
-  amountFunction,
-  grantComponentRole,
-  grantRole,
-  getTransactionEvent,
-  addEToken,
-} = require("@ensuro/core/js/test-utils");
+const { deployPool, deployPremiumsAccount, addEToken } = require("@ensuro/core/js/test-utils");
+const { amountFunction, grantRole, grantComponentRole, getTransactionEvent } = require("@ensuro/core/js/utils");
+
 const helpers = require("@nomicfoundation/hardhat-network-helpers");
 const hre = require("hardhat");
 
@@ -58,7 +51,7 @@ describe("Test AAVE asset manager - running at https://polygonscan.com/block/333
     await helpers.setBalance(ADDRESSES.usrUSDC, 100n ** 18n);
     lp = await hre.ethers.getSigner(ADDRESSES.usrUSDC);
 
-    pool = await deployPool(hre, {
+    pool = await deployPool({
       currency: ADDRESSES.usdc,
       grantRoles: [],
       treasuryAddress: "0x12345678901234567890123456789061c9177f41",
@@ -70,7 +63,7 @@ describe("Test AAVE asset manager - running at https://polygonscan.com/block/333
     srEtk = await addEToken(pool, {});
     jrEtk = await addEToken(pool, {});
 
-    await deployPremiumsAccount(hre, pool, {
+    await deployPremiumsAccount(pool, {
       jrEtkAddr: jrEtk.address,
       srEtkAddr: srEtk.address,
     });
