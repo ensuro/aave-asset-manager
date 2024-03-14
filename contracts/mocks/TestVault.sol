@@ -64,11 +64,7 @@ contract TestVault is ERC4626 {
     _asset().safeTransfer(borrower, amount);
   }
 
-  function repay(
-    address borrower,
-    uint256 amount,
-    uint256 interest
-  ) external {
+  function repay(address borrower, uint256 amount, uint256 interest) external {
     _debt -= amount;
     _asset().safeTransferFrom(borrower, address(this), amount + interest);
   }

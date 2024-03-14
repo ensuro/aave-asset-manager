@@ -19,19 +19,9 @@ import {IPool} from "./dependencies/aave-v3/IPool.sol";
 contract AAVEv3PlusVaultAssetManager is AAVEv3AssetManager {
   IERC4626 internal immutable _vault;
 
-  constructor(
-    IERC20Metadata asset_,
-    IPool aave_,
-    IERC4626 vault_
-  ) AAVEv3AssetManager(asset_, aave_) {
-    require(
-      address(vault_) != address(0),
-      "AAVEv3PlusVaultAssetManager: vault cannot be zero address"
-    );
-    require(
-      address(asset_) == vault_.asset(),
-      "AAVEv3PlusVaultAssetManager: vault must have the same asset"
-    );
+  constructor(IERC20Metadata asset_, IPool aave_, IERC4626 vault_) AAVEv3AssetManager(asset_, aave_) {
+    require(address(vault_) != address(0), "AAVEv3PlusVaultAssetManager: vault cannot be zero address");
+    require(address(asset_) == vault_.asset(), "AAVEv3PlusVaultAssetManager: vault must have the same asset");
     _vault = vault_;
   }
 
@@ -39,8 +29,7 @@ contract AAVEv3PlusVaultAssetManager is AAVEv3AssetManager {
     LiquidityThresholdAssetManager._deinvest(amount);
     uint256 aaveAmount = Math.min(amount, _aToken.balanceOf(address(this)));
     if (aaveAmount != 0) _aave.withdraw(address(_asset), aaveAmount, address(this));
-    if (amount - aaveAmount != 0)
-      _vault.withdraw(amount - aaveAmount, address(this), address(this));
+    if (amount - aaveAmount != 0) _vault.withdraw(amount - aaveAmount, address(this), address(this));
   }
 
   function connect() public override {
@@ -59,9 +48,7 @@ contract AAVEv3PlusVaultAssetManager is AAVEv3AssetManager {
      * be reported as losses.
      */
     uint256 redeemable = _vault.maxRedeem(address(this));
-    uint256 fromVault = redeemable != 0
-      ? _vault.redeem(redeemable, address(this), address(this))
-      : 0;
+    uint256 fromVault = redeemable != 0 ? _vault.redeem(redeemable, address(this), address(this)) : 0;
     earnings = int256(fromAAVE + fromVault) - int256(uint256(ds.lastInvestmentValue));
     ds.lastInvestmentValue = 0;
     emit MoneyDeinvested(fromAAVE + fromVault);
@@ -70,8 +57,7 @@ contract AAVEv3PlusVaultAssetManager is AAVEv3AssetManager {
   }
 
   function getInvestmentValue() public view virtual override returns (uint256) {
-    return
-      _aToken.balanceOf(address(this)) + _vault.convertToAssets(_vault.balanceOf(address(this)));
+    return _aToken.balanceOf(address(this)) + _vault.convertToAssets(_vault.balanceOf(address(this)));
   }
 
   /**
