@@ -1,7 +1,7 @@
 const hre = require("hardhat");
 const { expect } = require("chai");
 const helpers = require("@nomicfoundation/hardhat-network-helpers");
-const { deployPool, deployPremiumsAccount, addEToken } = require("@ensuro/core/js/test-utils");
+const { deployPool, deployPremiumsAccount, addEToken, setupChain } = require("@ensuro/core/js/test-utils");
 const { amountFunction, grantRole, grantComponentRole, getTransactionEvent } = require("@ensuro/core/js/utils");
 
 const { ethers } = hre;
@@ -36,18 +36,7 @@ describe("Test AAVE asset manager - running at https://polygonscan.com/block/333
   };
 
   beforeEach(async () => {
-    if (process.env.ALCHEMY_URL === undefined) throw new Error("Define envvar ALCHEMY_URL for this test");
-    await hre.network.provider.request({
-      method: "hardhat_reset",
-      params: [
-        {
-          forking: {
-            jsonRpcUrl: process.env.ALCHEMY_URL,
-            blockNumber: 33313517,
-          },
-        },
-      ],
-    });
+    await setupChain(33313517);
     [owner, lp2, guardian, admin] = await hre.ethers.getSigners();
     await helpers.impersonateAccount(ADDRESSES.usrUSDC);
     await helpers.setBalance(ADDRESSES.usrUSDC, 100n ** 18n);
